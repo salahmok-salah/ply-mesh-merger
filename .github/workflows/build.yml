@@ -8,6 +8,9 @@ on:
 jobs:
   build:
     runs-on: windows-latest
+    env:
+      # Suppresses the runner deprecation warning for forced Node upgrades
+      ACTIONS_RUNNER_FORCE_ACTIONS_NODE_VERSION: "node24"
 
     steps:
     - name: Check out repository
