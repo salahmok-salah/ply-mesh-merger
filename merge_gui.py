@@ -13,7 +13,10 @@ def process_merge(files, output_path, status_lbl, progress_bar, run_btn):
         total_vertex_count = 0
         all_comments = []
 
-        # Keep temporary files open inside the context manager
+        # If user pointed to a folder instead of a file, append a default name
+        if os.path.isdir(output_path):
+            output_path = os.path.join(output_path, "merged_output.ply")
+
         with tempfile.NamedTemporaryFile("w+", delete=False, encoding="ascii") as f_pts, \
              tempfile.NamedTemporaryFile("w+", delete=False, encoding="ascii") as f_cams:
             
@@ -31,7 +34,9 @@ def process_merge(files, output_path, status_lbl, progress_bar, run_btn):
                         if in_header:
                             stripped = line.strip()
                             if stripped.startswith("comment"):
-                                all_comments.append(stripped)
+                                # Skip any incoming "comment user 0" lines to avoid duplicates
+                                if stripped != "comment user 0":
+                                    all_comments.append(stripped)
                             elif stripped == "end_header":
                                 in_header = False
                             continue
@@ -47,11 +52,9 @@ def process_merge(files, output_path, status_lbl, progress_bar, run_btn):
                             f_cams.write(line)
                             total_vertex_count += 1
 
-            # Flush while still within the open block
             f_pts.flush()
             f_cams.flush()
 
-        # Both temp files are now safely closed on disk and ready for assembly
         status_lbl.config(text=f"Assembling output ({total_vertex_count:,} vertices)...")
         progress_bar["value"] = 75
 
@@ -64,6 +67,8 @@ def process_merge(files, output_path, status_lbl, progress_bar, run_btn):
             outfile.write("property float nx\nproperty float ny\nproperty float nz\n")
             outfile.write("property uchar diffuse_red\nproperty uchar diffuse_green\nproperty uchar diffuse_blue\n")
 
+            # Write 'comment user 0' exactly once before the image comments
+            outfile.write("comment user 0\n")
             for comment in all_comments:
                 outfile.write(f"{comment}\n")
             outfile.write("end_header\n")
@@ -87,7 +92,6 @@ def process_merge(files, output_path, status_lbl, progress_bar, run_btn):
         messagebox.showerror("Error", str(e))
         status_lbl.config(text="Failed.")
     finally:
-        # Clean up temp files safely
         if temp_points and os.path.exists(temp_points):
             try: os.remove(temp_points)
             except Exception: pass
