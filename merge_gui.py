@@ -59,7 +59,7 @@ def process_pipeline(parts, output_path, reindex_enabled, status_lbl, progress_b
                             f_cams.write(line)
                             total_vertex_count += 1
 
-                # If NOT reindexing: keep comments as they are (or update to new folder if provided)
+                # If NOT reindexing: pass comments through
                 if not reindex_enabled:
                     for c in part_comments:
                         if img_dir and os.path.isdir(img_dir):
@@ -69,7 +69,7 @@ def process_pipeline(parts, output_path, reindex_enabled, status_lbl, progress_b
                             all_comments.append(c)
                     continue
 
-                # If Reindexing: compute ID shifts and rename disk files
+                # If Reindexing: compute ID shifts and rename physical disk files
                 id_list = []
                 pattern = re.compile(r"^(\d+)(_(?:left|right)_.*\.jpg)$")
                 for c in part_comments:
@@ -91,8 +91,9 @@ def process_pipeline(parts, output_path, reindex_enabled, status_lbl, progress_b
                     if current_max_id >= 0:
                         offset = (current_max_id + global_step) - part_min_id
 
-                    # Rename disk files
-                    if img_dir and os.path.exists(img_dir):
+                    # Rename actual disk files
+                    if img_dir and os.path.isdir(img_dir):
+                        status_lbl.config(text=f"Renaming files in: {os.path.basename(img_dir)} (Offset: +{offset})")
                         rename_pairs = []
                         for filename in os.listdir(img_dir):
                             m = pattern.match(filename)
@@ -111,8 +112,8 @@ def process_pipeline(parts, output_path, reindex_enabled, status_lbl, progress_b
                         for _, temp, final in rename_pairs:
                             os.rename(temp, final)
 
-                    # Update comment paths
-                    target_dir = img_dir if (img_dir and os.path.isdir(img_dir)) else None
+                    # Update comment paths using the chosen folder
+                    target_dir = img_dir if (img_dir and os.path.isdir(img_dir)) else ""
                     for c in part_comments:
                         full_img_path = c[7:].strip()
                         dir_path = target_dir if target_dir else os.path.dirname(full_img_path)
@@ -154,8 +155,8 @@ def process_pipeline(parts, output_path, reindex_enabled, status_lbl, progress_b
 
         progress_bar["value"] = 100
         status_lbl.config(text="Complete!")
-        msg = "Merged & Renamed successfully!" if reindex_enabled else "Merged successfully (IDs unchanged)!"
-        messagebox.showinfo("Success", f"{msg}\nVertices: {total_vertex_count:,}\nFile: {output_path}")
+        msg = "Merged & Physical images renamed successfully!" if reindex_enabled else "Merged successfully (Solo mode)!"
+        messagebox.showinfo("Success", f"{msg}\nTotal Vertices: {total_vertex_count:,}\nFile: {output_path}")
 
     except Exception as e:
         messagebox.showerror("Error", str(e))
@@ -174,12 +175,12 @@ class PLYMergerApp:
     def __init__(self, root):
         self.root = root
         self.root.title("PLY Point Cloud & Camera Merger")
-        self.root.geometry("620x520")
+        self.root.geometry("700x530")
 
         self.parts = []
-        self.reindex_var = tk.BooleanVar(value=False)
+        self.reindex_var = tk.BooleanVar(value=True)
 
-        tk.Label(root, text="Selected Files / Parts (In Sequence):", font=("Segoe UI", 9, "bold")).pack(anchor="w", padx=15, pady=(10, 2))
+        tk.Label(root, text="Model Parts Sequence:", font=("Segoe UI", 9, "bold")).pack(anchor="w", padx=15, pady=(10, 2))
         
         frame_list = tk.Frame(root)
         frame_list.pack(fill="both", expand=True, padx=15)
@@ -193,7 +194,10 @@ class PLYMergerApp:
 
         btn_frame = tk.Frame(root)
         btn_frame.pack(fill="x", padx=15, pady=5)
-        tk.Button(btn_frame, text="Add Files...", command=self.add_files).pack(side="left", padx=2)
+        
+        self.add_btn = tk.Button(btn_frame, text="Add Part...", bg="#e1e1e1", command=self.add_part_dialog)
+        self.add_btn.pack(side="left", padx=2)
+        
         tk.Button(btn_frame, text="Move Up", command=self.move_up).pack(side="left", padx=2)
         tk.Button(btn_frame, text="Move Down", command=self.move_down).pack(side="left", padx=2)
         tk.Button(btn_frame, text="Clear", command=self.clear_all).pack(side="right", padx=2)
@@ -205,7 +209,8 @@ class PLYMergerApp:
             opt_frame, 
             text="Rename physical images and re-index image IDs consecutively", 
             variable=self.reindex_var,
-            font=("Segoe UI", 9)
+            font=("Segoe UI", 9, "bold"),
+            command=self.update_ui_state
         )
         self.chk.pack(anchor="w")
 
@@ -224,22 +229,40 @@ class PLYMergerApp:
         self.run_btn = tk.Button(root, text="Execute Merge", bg="#007acc", fg="white", font=("Segoe UI", 10, "bold"), height=2, command=self.start_pipeline)
         self.run_btn.pack(fill="x", padx=15, pady=10)
 
-    def add_files(self):
+        self.update_ui_state()
+
+    def update_ui_state(self):
         if self.reindex_var.get():
-            # In re-index mode, prompt for matching image folder
-            ply = filedialog.askopenfilename(title="Select Part PLY File", filetypes=[("PLY files", "*.ply")])
-            if not ply: return
-            folder = filedialog.askdirectory(title="Select Matching Images Folder for this Part")
-            if not folder: return
-            self.parts.append({"ply": ply, "img_folder": folder})
-            self.listbox.insert(tk.END, f"{os.path.basename(ply)}  -->  [{folder}]")
+            self.add_btn.config(text="Add Part (PLY + Image Folder)...")
         else:
-            # Simple merge: multi-select PLY files directly
+            self.add_btn.config(text="Add PLY Files (Solo Merge)...")
+
+    def add_part_dialog(self):
+        if self.reindex_var.get():
+            # Force selecting both the PLY and the image folder
+            ply = filedialog.askopenfilename(
+                title=f"Select Part #{len(self.parts) + 1} PLY File", 
+                filetypes=[("PLY files", "*.ply")]
+            )
+            if not ply: 
+                return
+
+            folder = filedialog.askdirectory(
+                title=f"Select Physical Images Folder for Part #{len(self.parts) + 1}"
+            )
+            if not folder:
+                messagebox.showwarning("Warning", "Image folder selection is required when Re-indexing is checked.")
+                return
+
+            self.parts.append({"ply": ply, "img_folder": folder})
+            self.listbox.insert(tk.END, f"[Part {len(self.parts)}] PLY: {os.path.basename(ply)}  <-->  Images: {folder}")
+        else:
+            # Solo merge: multi-select PLY files directly
             chosen = filedialog.askopenfilenames(filetypes=[("PLY files", "*.ply")])
             for f in chosen:
                 if not any(p["ply"] == f for p in self.parts):
                     self.parts.append({"ply": f, "img_folder": None})
-                    self.listbox.insert(tk.END, os.path.basename(f))
+                    self.listbox.insert(tk.END, f"[Solo] {os.path.basename(f)}")
 
     def move_up(self):
         sel = self.listbox.curselection()
@@ -273,12 +296,24 @@ class PLYMergerApp:
 
     def start_pipeline(self):
         if not self.parts:
-            messagebox.showwarning("Warning", "Add at least one PLY file.")
+            messagebox.showwarning("Warning", "Add at least one part.")
             return
+
         out = self.out_entry.get().strip()
         if not out:
             messagebox.showwarning("Warning", "Specify an output file destination.")
             return
+
+        # Pre-flight sanity check for reindex mode
+        if self.reindex_var.get():
+            for i, p in enumerate(self.parts):
+                if not p.get("img_folder") or not os.path.isdir(p["img_folder"]):
+                    messagebox.showerror(
+                        "Missing Image Folder", 
+                        f"Part #{i + 1} ({os.path.basename(p['ply'])}) has no valid physical image folder assigned.\n\nClear the list and re-add using 'Add Part' with re-indexing turned on."
+                    )
+                    return
+
         self.run_btn.config(state="disabled")
         threading.Thread(
             target=process_pipeline, 
