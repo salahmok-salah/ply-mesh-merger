@@ -7,46 +7,51 @@ from tkinter import filedialog, messagebox, ttk
 
 
 def process_merge(files, output_path, status_lbl, progress_bar, run_btn):
+    temp_points = None
+    temp_cams = None
     try:
         total_vertex_count = 0
         all_comments = []
 
+        # Keep temporary files open inside the context manager
         with tempfile.NamedTemporaryFile("w+", delete=False, encoding="ascii") as f_pts, \
              tempfile.NamedTemporaryFile("w+", delete=False, encoding="ascii") as f_cams:
             
             temp_points = f_pts.name
             temp_cams = f_cams.name
 
-        total_files = len(files)
-        for idx, file_path in enumerate(files):
-            status_lbl.config(text=f"Reading file {idx + 1} of {total_files}: {os.path.basename(file_path)}")
-            progress_bar["value"] = (idx / total_files) * 50
+            total_files = len(files)
+            for idx, file_path in enumerate(files):
+                status_lbl.config(text=f"Reading file {idx + 1} of {total_files}: {os.path.basename(file_path)}")
+                progress_bar["value"] = (idx / total_files) * 50
 
-            in_header = True
-            with open(file_path, "r", encoding="ascii", errors="replace") as infile:
-                for line in infile:
-                    if in_header:
-                        stripped = line.strip()
-                        if stripped.startswith("comment"):
-                            all_comments.append(stripped)
-                        elif stripped == "end_header":
-                            in_header = False
-                        continue
+                in_header = True
+                with open(file_path, "r", encoding="ascii", errors="replace") as infile:
+                    for line in infile:
+                        if in_header:
+                            stripped = line.strip()
+                            if stripped.startswith("comment"):
+                                all_comments.append(stripped)
+                            elif stripped == "end_header":
+                                in_header = False
+                            continue
 
-                    stripped_line = line.strip()
-                    if not stripped_line:
-                        continue
+                        stripped_line = line.strip()
+                        if not stripped_line:
+                            continue
 
-                    if stripped_line.startswith("0 "):
-                        f_pts.write(line)
-                        total_vertex_count += 1
-                    elif stripped_line.startswith("1 "):
-                        f_cams.write(line)
-                        total_vertex_count += 1
+                        if stripped_line.startswith("0 "):
+                            f_pts.write(line)
+                            total_vertex_count += 1
+                        elif stripped_line.startswith("1 "):
+                            f_cams.write(line)
+                            total_vertex_count += 1
 
-        f_pts.flush()
-        f_cams.flush()
+            # Flush while still within the open block
+            f_pts.flush()
+            f_cams.flush()
 
+        # Both temp files are now safely closed on disk and ready for assembly
         status_lbl.config(text=f"Assembling output ({total_vertex_count:,} vertices)...")
         progress_bar["value"] = 75
 
@@ -71,11 +76,6 @@ def process_merge(files, output_path, status_lbl, progress_bar, run_btn):
             with open(temp_cams, "r", encoding="ascii") as fc_in:
                 shutil.copyfileobj(fc_in, outfile, length=16 * 1024 * 1024)
 
-        if os.path.exists(temp_points):
-            os.remove(temp_points)
-        if os.path.exists(temp_cams):
-            os.remove(temp_cams)
-
         progress_bar["value"] = 100
         status_lbl.config(text="Complete!")
         messagebox.showinfo(
@@ -87,6 +87,13 @@ def process_merge(files, output_path, status_lbl, progress_bar, run_btn):
         messagebox.showerror("Error", str(e))
         status_lbl.config(text="Failed.")
     finally:
+        # Clean up temp files safely
+        if temp_points and os.path.exists(temp_points):
+            try: os.remove(temp_points)
+            except Exception: pass
+        if temp_cams and os.path.exists(temp_cams):
+            try: os.remove(temp_cams)
+            except Exception: pass
         run_btn.config(state="normal")
 
 
